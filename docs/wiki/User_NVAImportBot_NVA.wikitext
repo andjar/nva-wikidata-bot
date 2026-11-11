@@ -1,0 +1,57 @@
+This page describes the task linked from every edit summary of [[User:NVAImportBot|NVAImportBot]].
+Operator: [[User:Ajarmund|Ajarmund]]. Source code: https://github.com/andjar/nva-wikidata-bot
+
+== Source ==
+[https://nva.sikt.no Nasjonalt vitenarkiv] (NVA) is the Norwegian national archive of research output, run by
+[https://sikt.no Sikt]. It replaced Cristin. Data is read from the public API (https://api.nva.unit.no):
+person profiles (<code>/cristin/person/{id}</code>) and publications (<code>/search/resources</code>).
+Only NVA person profiles marked ''verified'' and publications with status ''PUBLISHED'' are used.
+
+== Commands and what each one adds ==
+{| class="wikitable"
+! Command !! Items it looks at !! What it can add
+|-
+| <code>persons</code> || items with {{P|2287}} || {{P|496}}; {{P|108}} with {{P|2868}} qualifier
+|-
+| <code>link-orcid</code> || people with {{P|496}} but no {{P|2287}} (employer in Norway) || {{P|2287}}
+|-
+| <code>works</code> || works of linked people in NVA, matched by DOI or handle || {{P|1184}}, {{P|356}}, {{P|1476}}, {{P|577}}, {{P|50}}
+|-
+| <code>doi-handles</code> || NVA records with a DOI and a handle, matched by DOI || {{P|1184}} only
+|-
+| <code>handles</code> || items that already have an NVA handle || same as <code>works</code>
+|-
+| <code>works --create</code> || NVA works with no item || a new item (separate approval)
+|}
+
+== References ==
+Person data: {{P|248}} = NVA, {{P|2287}} = the profile id, {{P|813}} = date read.<br>
+Work data: {{P|248}} = NVA, {{P|854}} = <code>https://nva.sikt.no/registration/…</code>, {{P|813}} = date read.<br>
+If an identical statement already exists, the reference is added to it instead of adding a second statement.
+
+== Rules ==
+; Matching works
+: A DOI or handle match must also agree with Wikidata on title (similarity ≥ 0.8) and year (± 1), otherwise the item is not edited.
+; Duplicates
+: Values are normalised before comparison (DOI case, URL forms of DOI/handle/ORCID). A value present in any rank, including deprecated, is never added again.
+; Conflicts
+: If the item has a different value for {{P|496}} or {{P|356}}, or the value is already used on another item, nothing is written and the case is listed at [[User:NVAImportBot/NVA/Review]].
+; Authors
+: {{P|50}} is only added for contributors whose NVA person ID is on exactly one Wikidata item. A matching {{P|2093}} is converted (series ordinal kept, name kept as {{P|1932}}). Otherwise {{P|50}} is added only if the NVA position in the author list is free.
+; Employer
+: NVA has no start or end dates. Current affiliations are added without dates; the reference's {{P|813}} says when it was true. Former affiliations are not added. An existing employer statement gets a missing position qualifier and a reference, never a duplicate. Institutions and positions are mapped by hand-checked lists in the bot configuration.
+; Handles
+: The NVA handle is added when the item has no handle, or already has a handle of the same NVA record. Items with an unrelated handle are left alone and reported.
+
+== Precautions ==
+* Dry runs (reports only) before every new task or larger change.
+* Edit budget per run; circuit breaker after repeated errors; <code>maxlag=5</code>; one atomic edit per item with edit-conflict detection.
+* Stops on any talk page message, when [[User:NVAImportBot/Stop]] does not say <code>run</code>, or on a local stop file.
+* Every decision is logged; runs are [[Wikidata:Edit groups|edit groups]] and can be undone as a whole.
+
+== Schedule ==
+Weekly: <code>persons</code> (Mondays), <code>works</code> for records changed since the last run (Wednesdays), <code>doi-handles</code> (Fridays).
+
+== Reports ==
+* [[User:NVAImportBot/NVA/Stats]] – statistics, updated after each run
+* [[User:NVAImportBot/NVA/Review]] – conflicts and suggestions for humans

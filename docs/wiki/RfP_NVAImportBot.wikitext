@@ -1,0 +1,34 @@
+<!-- Page: Wikidata:Requests for permissions/Bot/NVAImportBot
+     Fill in the two places marked FILL IN after the dry run and the test edits. -->
+=== [[User:NVAImportBot|NVAImportBot]] ===
+[[User:NVAImportBot|NVAImportBot]] ([[User talk:NVAImportBot|talk]] • [[Special:Contributions/NVAImportBot|contribs]] • [[Special:Log/NVAImportBot|logs]])
+
+'''Operator:''' [[User:Ajarmund|Ajarmund]] ([[User talk:Ajarmund|talk]] • [[Special:Contributions/Ajarmund|contribs]])
+
+'''Task/s:''' Add missing, referenced data from Nasjonalt vitenarkiv (NVA, the Norwegian national research archive
+that replaced Cristin) to people and scholarly works that are already on Wikidata:
+# '''People with {{P|2287}}:''' add {{P|496}}, and {{P|108}} with the NVA position as {{P|2868}} qualifier.
+# '''People with {{P|496}} but no {{P|2287}}''' (employer in Norway): add {{P|2287}} when the ORCID iD matches a verified NVA profile.
+# '''Works matched to NVA by DOI or handle:''' add {{P|1184}} (also for works found only by DOI, to make them easy to maintain), {{P|356}}, {{P|1476}}, {{P|577}} when missing, and {{P|50}} links to authors who have {{P|2287}}. A matching {{P|2093}} is converted into {{P|50}}.
+
+Item creation is ''not'' part of this request; it will be requested separately.
+
+'''Code:''' https://github.com/andjar/nva-wikidata-bot (Python, [[mw:Manual:Pywikibot|Pywikibot]], GPL-3.0). Task description: [[User:NVAImportBot/NVA]].
+
+'''Function details:'''
+* '''Source:''' public NVA API (https://api.nva.unit.no). Only verified person profiles and published records are used.
+* '''References:''' every statement gets {{P|248}} NVA, plus {{P|2287}} (people) or {{P|854}} to the NVA record (works), and {{P|813}}. Existing identical statements get the reference instead of a duplicate statement.
+* '''No duplicates or overwriting:'''
+** each item is read from the API right before editing; values are normalised (DOI case, URL forms) before comparing;
+** a value already on the item in any rank, including deprecated, is never added again;
+** if the item has a different value (e.g. another ORCID iD or DOI), or the value is already used on another item, the bot does not edit and lists the case at [[User:NVAImportBot/NVA/Review]];
+** a DOI or handle match must also agree on title and year, otherwise the item is not touched;
+** the only removal is the standard {{P|2093}} → {{P|50}} conversion, keeping {{P|1545}} and the name as {{P|1932}}.
+* '''Authors:''' {{P|50}} only via an NVA person ID that is on exactly one item; added at the NVA position only if that position is free in the author list, otherwise reported.
+* '''Employer:''' NVA has no start or end dates, so none are added; former affiliations are not added; existing {{P|108}} statements get a missing {{P|2868}} qualifier and a reference, never a second statement. Institutions and positions come from hand-checked mappings.
+* '''Safety:''' one atomic <code>wbeditentity</code> per item with <code>baserevid</code>; <code>maxlag=5</code>; edit budget per run; stops after repeated errors; stops on any talk page message or when [[User:NVAImportBot/Stop]] is changed.
+* '''Transparency:''' every edit summary links [[User:NVAImportBot/NVA]] and an [[Wikidata:Edit groups|edit group]]; statistics at [[User:NVAImportBot/NVA/Stats]].
+* '''Expected volume:''' about <!-- FILL IN from `python -m nvabot check` and the dry-run reports --> NNN people with {{P|2287}} and NNN works; first a full pass, then weekly runs for records changed in NVA.
+* '''Test edits:''' <!-- FILL IN: link to the edit group of the 50–250 test edits --> [https://editgroups.toolforge.org/b/CB/XXXXXXXXXX/ edit group].
+
+--~~~~

@@ -1,0 +1,14 @@
+config.yaml
+user-config.py
+user-password.py
+*.lwp
+apicache*/
+throttle.ctrl
+logs/
+reports/
+data/
+STOP
+venv/
+__pycache__/
+.pytest_cache/
+.nvabot.lock

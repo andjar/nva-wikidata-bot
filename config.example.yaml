@@ -1,0 +1,142 @@
+# NVA → Wikidata bot configuration. Copy to config.yaml and edit.
+# Everything not set here falls back to the defaults in nvabot/config.py.
+
+bot:
+  name: NVAImportBot                     # the bot account (separate from your own account)
+  # Wikimedia User-Agent policy: identify the bot and give a way to reach the operator.
+  user_agent: "NVAImportBot/0.2 (https://www.wikidata.org/wiki/User:NVAImportBot; https://github.com/andjar/nva-wikidata-bot)"
+  site: wikidata                         # 'test' = test.wikidata.org (different P/Q ids - override below!)
+  run_info_page: "User:NVAImportBot/NVA"           # linked from every edit summary
+  stop_page: "User:NVAImportBot/Stop"              # bot only edits while this page contains just: run
+  stop_on_talk_message: true             # any new talk page message stops the bot
+  editgroups: true                       # adds an EditGroups link so a whole run can be reviewed/undone
+  assert_user: true                      # never edit while logged out
+  source_url: "https://github.com/andjar/nva-wikidata-bot"
+
+limits:
+  max_edits_per_run: 50                  # raise after the bot is approved
+  unflagged_max_edits: 250               # hard cap while the account has no bot flag (trial edits)
+  stop_check_every: 10                   # re-check stop page / talk page every N edits
+  max_consecutive_failures: 5            # circuit breaker
+  max_failure_ratio: 0.2                 # circuit breaker over the last 50 edits
+  nva_min_interval_seconds: 0.25         # politeness towards api.nva.unit.no
+  sparql_min_interval_seconds: 1.0
+  maxlag: 5
+
+wikidata:
+  sparql_endpoints:
+    main: https://query.wikidata.org/sparql
+    scholarly: https://query-scholarly.wikidata.org/sparql   # scholarly articles since the WDQS graph split
+  # Item for "Nasjonalt vitenarkiv" used in 'stated in' references. null = read it from
+  # 'applicable stated in value' (P9073) on the NVA person ID property; the run stops if that fails.
+  nva_item: null
+  human_item: Q5
+  handle_prefixes: ["11250"]             # handle prefixes the 'handles' command looks for on Wikidata
+  properties:
+    nva_person_id: P2287                 # verify: should be the property labelled "NVA person ID"
+    orcid: P496
+    handle: P1184
+    doi: P356
+    title: P1476
+    publication_date: P577
+    author: P50
+    author_name_string: P2093
+    series_ordinal: P1545
+    object_named_as: P1932
+    instance_of: P31
+    employer: P108
+    stated_in: P248
+    reference_url: P854
+    retrieved: P813
+    applicable_stated_in: P9073
+    position_qualifier: P2868            # 'subject has role' qualifier on employer (P108)
+    end_time: P582
+    published_in: P1433
+    volume: P478
+    issue: P433
+    pages: P304
+    number_of_pages: P1104
+    language_of_work: P407
+    issn: P236
+    org_id: null                         # optional property holding NVA/Cristin institution ids
+
+nva:
+  api_base: https://api.nva.unit.no
+  landing_page: "https://nva.sikt.no/registration/{identifier}"
+  person_page: "https://nva.sikt.no/research-profile/{id}"
+  author_roles: [Creator]
+  page_size: 100
+  max_pages: 5000                        # safety cap per NVA query (x page_size records)
+
+# Institutions (employer). Key: NVA/Cristin institution number (first part of e.g. 194.65.20.0).
+# Add the institutions you care about after checking the items by hand; unmapped ones are skipped.
+org_items: {}
+#  "194": Q...    # NTNU
+#  "185": Q...    # University of Oslo
+
+# Positions (qualifier on employer). Key: NVA role label in lower case (English or Bokmål).
+# Run `python -m nvabot suggest-positions` to get the labels used in NVA with candidate items.
+positions: {}
+#  "professor": Q...
+#  "associate professor": Q...
+
+policy:
+  require_verified_person: true          # only use NVA profiles marked verified
+  add_orcid: true
+  add_employer: true                     # current NVA affiliations -> employer (P108), no dates
+  add_position: true                     # NVA role -> qualifier on the employer statement
+  add_former_employers: false            # inactive affiliations, with end time = unknown value
+  mark_ended_employment: false           # add end time = unknown value to employer statements only NVA backs
+  add_references_to_existing: true       # existing identical statements get an NVA reference
+  add_handle: true
+  add_doi: true
+  add_title: true                        # only if the item has no title at all
+  add_publication_date: true             # only if the item has no publication date at all
+  add_authors: true                      # P50 only for contributors linked via NVA person ID
+  convert_author_name_strings: true      # replace a matching author name string (P2093) by author (P50)
+  add_author_at_free_ordinal: true       # add P50 when the NVA position in the author list is still free
+  add_handle_when_other_handle_present: false
+  title_similarity_threshold: 0.8        # identifier match must also agree on title...
+  year_tolerance: 1                      # ...and on year, otherwise nothing is edited
+
+# Creating items for NVA records that are not on Wikidata (works --create).
+# Off until you enable it here AND pass --create. Classes and languages are checked against
+# Wikidata at the start of every run (must be subclasses of 'work' / instances of a language).
+create:
+  enabled: false
+  max_per_run: 25
+  work_class: Q386724                    # 'work'
+  require_linked_author: true            # at least one author with an NVA person ID on Wikidata
+  require_identifier: true               # DOI or handle, so the item can be maintained later
+  max_authors: 300
+  duplicate_title_similarity: 0.9        # title search for items without DOI/handle
+  label_fallback_language: mul           # label language when NVA gives no language
+  types:                                 # NVA publicationInstance.type -> class and descriptions
+    AcademicArticle: {class: Q13442814, en: scholarly article, nb: vitenskapelig artikkel, venue_required: true}
+    AcademicLiteratureReview: {class: Q7318358, en: review article, nb: oversiktsartikkel, venue_required: true}
+    AcademicMonograph: {class: Q193495, en: monograph, nb: monografi}
+    DegreePhd: {class: Q187685, en: doctoral thesis, nb: doktoravhandling}
+    ReportResearch: {class: Q10870555, en: research report, nb: forskningsrapport}
+    # DegreeMaster: {class: Q1907875, en: master's thesis, nb: masteroppgave}
+    # AcademicChapter: {class: Q1980247, en: chapter, nb: kapittel}
+  languages: {en: Q1860, nb: Q25167, nn: Q25164, no: Q9043}
+
+link_by_orcid:
+  # Items that have an ORCID but no NVA person ID. Keep it narrow (here: employer in Norway).
+  candidate_query: |
+    SELECT DISTINCT ?item ?orcid WHERE {
+      ?item wdt:P31 wd:Q5 ; wdt:P496 ?orcid ; wdt:P108/wdt:P17 wd:Q20 .
+      FILTER NOT EXISTS { ?item p:P2287 [] }
+    }
+
+paths:
+  state_db: data/state.sqlite
+  log_dir: logs
+  report_dir: reports
+  stop_file: STOP                        # touch this file to stop a running bot locally
+
+stats:
+  publish: true                          # live runs update the two pages below
+  stats_page: "User:NVAImportBot/NVA/Stats"
+  conflicts_page: "User:NVAImportBot/NVA/Review"
+  max_conflict_rows: 500

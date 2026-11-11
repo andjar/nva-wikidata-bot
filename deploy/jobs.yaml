@@ -1,0 +1,18 @@
+# Toolforge jobs:  toolforge jobs load deploy/jobs.yaml
+# Each job runs ./deploy/run.sh, which activates the venv and runs one command.
+- name: nva-persons
+  command: ./deploy/run.sh persons --live --resume
+  image: python3.11
+  schedule: "17 2 * * 1"        # Mondays 02:17 UTC
+  emails: onfailure
+- name: nva-works
+  command: ./deploy/run.sh works --live --incremental
+  image: python3.11
+  schedule: "43 3 * * 3"        # Wednesdays 03:43 UTC
+  emails: onfailure
+- name: nva-doi-handles
+  command: ./deploy/run.sh doi-handles --live --incremental
+  image: python3.11
+  schedule: "29 4 * * 5"        # Fridays 04:29 UTC
+  emails: onfailure
+# After approval for item creation, add --create to the nva-works job.

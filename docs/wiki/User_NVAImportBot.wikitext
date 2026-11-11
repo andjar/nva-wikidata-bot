@@ -1,0 +1,38 @@
+{{Bot|Ajarmund}}
+'''NVAImportBot''' is a bot operated by [[User:Ajarmund|Ajarmund]]. It adds missing, referenced data from
+[https://nva.sikt.no Nasjonalt vitenarkiv] (NVA, the Norwegian national research archive, successor of Cristin)
+to Wikidata.
+
+<!-- Remove this line once the bot flag is granted: -->
+''This bot is not yet approved. Request: [[Wikidata:Requests for permissions/Bot/NVAImportBot]].''
+
+== What it does ==
+* Adds '''ORCID iD''' ({{P|496}}), '''employer''' ({{P|108}}) and position (as {{P|2868}} qualifier) to people who
+  have an NVA person ID ({{P|2287}}).
+* Adds {{P|2287}} to people whose ORCID iD matches a verified NVA profile.
+* Adds '''Handle''' ({{P|1184}}), DOI ({{P|356}}), title, publication date and '''author''' ({{P|50}}) links to
+  scholarly works that can be matched to an NVA record by DOI or handle.
+* Converts an author name string ({{P|2093}}) into {{P|50}} when the author is linked to NVA, keeping the
+  series ordinal and the name as {{P|1932}}.
+* (Separate approval) Creates items for NVA publications that are not on Wikidata yet.
+
+Every statement gets a reference to NVA ({{P|248}}, NVA person ID or {{P|854}} to the NVA record, {{P|813}}).
+Full details: [[User:NVAImportBot/NVA]].
+
+== What it never does ==
+* Overwrite or remove a value (except the author name string → author conversion above).
+* Re-add a value that someone has deprecated.
+* Add a value that conflicts with what is already on the item, or that is already used on another item. Those cases
+  are listed for humans at [[User:NVAImportBot/NVA/Review]].
+
+== Stopping the bot ==
+* '''Leave a message on [[User talk:NVAImportBot|the talk page]].''' Any new message stops the bot until the operator
+  has read it.
+* Or edit [[User:NVAImportBot/Stop]] and replace <code>run</code> with anything else.
+* Administrators may block the bot if it misbehaves; please also notify [[User talk:Ajarmund|the operator]].
+
+== Links ==
+* Source code: https://github.com/andjar/nva-wikidata-bot (GPL-3.0)
+* Statistics: [[User:NVAImportBot/NVA/Stats]]
+* Cases for human review: [[User:NVAImportBot/NVA/Review]]
+* Each run is an [[Wikidata:Edit groups|edit group]]; every edit summary links to it, so a run can be reviewed or undone.

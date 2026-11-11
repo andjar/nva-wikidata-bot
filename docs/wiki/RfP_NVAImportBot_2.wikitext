@@ -1,0 +1,23 @@
+<!-- Page: Wikidata:Requests for permissions/Bot/NVAImportBot 2
+     File only after the first request is approved. Fill in the places marked FILL IN. -->
+=== [[User:NVAImportBot|NVAImportBot]] 2 ===
+[[User:NVAImportBot|NVAImportBot]] ([[User talk:NVAImportBot|talk]] • [[Special:Contributions/NVAImportBot|contribs]] • [[Special:Log/NVAImportBot|logs]])
+
+'''Operator:''' [[User:Ajarmund|Ajarmund]] ([[User talk:Ajarmund|talk]] • [[Special:Contributions/Ajarmund|contribs]])
+
+'''Task/s:''' Create items for publications in Nasjonalt vitenarkiv (NVA) that have at least one author on Wikidata
+(linked by {{P|2287}}) but are not on Wikidata yet, so that these researchers' publication lists are complete
+and linked back to them with {{P|50}}.
+
+'''Code:''' https://github.com/andjar/nva-wikidata-bot (command <code>works --create</code>). Task description: [[User:NVAImportBot/NVA]].
+
+'''Function details:'''
+* '''Types created:''' NVA ''AcademicArticle'' → {{Q|13442814}}, ''AcademicLiteratureReview'' → {{Q|7318358}}, ''AcademicMonograph'' → {{Q|193495}}, ''DegreePhd'' → {{Q|187685}}, ''ReportResearch'' → {{Q|10870555}}. <!-- FILL IN: adjust if you change create.types -->
+* '''Only created when''' the record is published in NVA, has a title, a valid date and a DOI or handle, has at least one author linked to Wikidata, and (for articles) its journal is found on Wikidata by {{P|236}}.
+* '''Duplicate checks before creating:''' no item has the DOI or any of the record's handles (main and scholarly query services); the bot's own log of created items (the query service lags); a full-text title search finds no item with the same title and year.
+* '''Contents:''' label, English and Bokmål descriptions ("scholarly article published in 2024"), {{P|31}}, {{P|1476}}, {{P|407}}, {{P|577}}, {{P|356}}, {{P|1184}}, {{P|1433}}, {{P|478}}, {{P|433}}, {{P|304}}, {{P|50}} for linked authors (with {{P|1545}} and {{P|1932}}) and {{P|2093}} for the others. Every statement is referenced to NVA.
+* '''Limits:''' at most <!-- FILL IN --> 25 new items per run; same safety stops as task 1.
+* '''Expected volume:''' about <!-- FILL IN from the dry-run report --> NNN items in the first pass, then a few per week.
+* '''Test edits:''' <!-- FILL IN --> [https://editgroups.toolforge.org/b/CB/XXXXXXXXXX/ edit group].
+
+--~~~~
