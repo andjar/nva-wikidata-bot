@@ -234,3 +234,40 @@ def test_doi_handles_adds_only_the_handle(cfg):
     assert len(FakeWriter.edits) == 1
     qid, claims, _ = FakeWriter.edits[0]
     assert qid == "Q100" and {c["mainsnak"]["property"] for c in claims} == {"P1184"}
+
+
+def test_suggest_mappings_only_fills_exact_matches(cfg, monkeypatch):
+    orgs = {"185": {"labels": {"nb": "Universitetet i Oslo", "en": "University of Oslo"}, "acronym": "UIO"},
+            "1990": {"labels": {"en": "Some Institute"}}}
+    FakeNva.institution = lambda self, num: orgs.get(num)
+    hits = {"University of Oslo": [{"id": "Q486156", "label": "University of Oslo", "description": "university"}],
+            "Universitetet i Oslo": [{"id": "Q486156", "label": "Universitetet i Oslo", "description": "universitet"}],
+            "Some Institute": [{"id": "Q9", "label": "Some Other Institute", "description": ""}],
+            "Professor": [{"id": "Q121594", "label": "professor", "description": "academic rank"}]}
+    FakeReader.search_entities = lambda self, text, lang="en", limit=3: hits.get(text, [])
+    cfg.policy.add_former_employers = True
+    r = runner_mod.Runner(cfg, "suggest-mappings", live=False)
+    assert r.execute(r.run_suggest_mappings) == "completed"
+    report = Path(cfg.path("report_dir"))
+    org_map = yaml.safe_load((report / "org-items-suggestions.yaml").read_text())
+    assert org_map == {"185": "Q486156", "1990": None}          # no exact match -> null, never a guess
+    positions = yaml.safe_load((report / "positions-suggestions.yaml").read_text())
+    assert positions["professor"] == "Q121594"
+    assert FakeWriter.edits == []
+
+    # The reviewed file can be used directly as org_items.
+    raw = yaml.safe_load(Path(cfg.base_dir / "config.yaml").read_text())
+    raw["org_items"] = str(report / "org-items-suggestions.yaml")
+    (cfg.base_dir / "config.yaml").write_text(yaml.safe_dump(raw))
+    cfg2 = Config.load(str(cfg.base_dir / "config.yaml"))
+    assert cfg2["org_items"] == {"185": "Q486156", "1990": None}
+
+
+def test_bad_mapping_file_is_rejected(cfg, tmp_path):
+    bad = tmp_path / "orgs.yaml"
+    bad.write_text('"185": University of Oslo\n')
+    raw = yaml.safe_load((cfg.base_dir / "config.yaml").read_text())
+    raw["org_items"] = str(bad)
+    (cfg.base_dir / "config.yaml").write_text(yaml.safe_dump(raw))
+    with pytest.raises(Exception, match="not an item id"):
+        Config.load(str(cfg.base_dir / "config.yaml"))

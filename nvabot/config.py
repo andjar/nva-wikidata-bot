@@ -52,6 +52,8 @@ class Config:
     def __init__(self, raw: dict, base_dir: Path):
         self.raw = raw
         self.base_dir = base_dir
+        for section in ("org_items", "positions"):
+            raw[section] = self._load_mapping(section, raw.get(section))
         self.props = Props.from_mapping(raw["wikidata"]["properties"])
         self.policy = Policy.from_mapping(raw["policy"])
         self.validate()
@@ -63,6 +65,22 @@ class Config:
             raise ConfigError(f"config file {p} not found (copy config.example.yaml)")
         data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
         return cls(_merge(DEFAULTS, data), p.resolve().parent)
+
+    def _load_mapping(self, section: str, value) -> dict:
+        """A mapping may be given inline or as the path of a YAML file (e.g. a reviewed suggestion file)."""
+        if value is None:
+            return {}
+        if isinstance(value, str):
+            path = Path(value) if Path(value).is_absolute() else self.base_dir / value
+            if not path.exists():
+                raise ConfigError(f"{section}: file {path} not found")
+            try:
+                value = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            except yaml.YAMLError as e:
+                raise ConfigError(f"{section}: {path} is not valid YAML: {e}") from e
+        if not isinstance(value, dict):
+            raise ConfigError(f"{section} must be a mapping or the path of a YAML file")
+        return {str(k): v for k, v in value.items()}
 
     def __getitem__(self, key):
         return self.raw[key]

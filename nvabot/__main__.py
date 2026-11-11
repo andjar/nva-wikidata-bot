@@ -75,8 +75,9 @@ def main(argv=None) -> int:
     p.add_argument("--since", type=date_arg, help="only NVA records modified since this date")
     p.add_argument("--year-since", type=int, help="only publications from this year on")
     p.add_argument("--incremental", action="store_true", help="continue from the last completed run")
-    p = sub.add_parser("suggest-positions", help="list NVA role labels with candidate items (no edits)")
-    p.add_argument("--limit", type=int, default=500, help="number of NVA profiles to sample")
+    p = sub.add_parser("suggest-mappings", aliases=["suggest-positions", "suggest-orgs"],
+                       help="propose institution and position items from NVA profiles (no edits)")
+    p.add_argument("--limit", type=int, default=500, help="number of NVA profiles to sample (0 = all)")
     p = sub.add_parser("stats", help="(re)build stats.json; --publish also updates the wiki pages")
     p.add_argument("--publish", action="store_true")
 
@@ -118,8 +119,8 @@ def main(argv=None) -> int:
     elif args.command == "doi-handles":
         status = runner.execute(runner.run_doi_handles, args.institution, args.since, args.year_since,
                                 args.incremental, args.limit)
-    elif args.command == "suggest-positions":
-        status = runner.execute(runner.run_suggest_positions, args.limit)
+    elif args.command in ("suggest-mappings", "suggest-positions", "suggest-orgs"):
+        status = runner.execute(runner.run_suggest_mappings, args.limit)
     else:
         status = runner.execute(runner.run_handles, args.limit)
     return 0 if status == "completed" or status.startswith("budget") else 1

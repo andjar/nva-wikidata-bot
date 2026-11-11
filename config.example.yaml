@@ -68,17 +68,19 @@ nva:
   page_size: 100
   max_pages: 5000                        # safety cap per NVA query (x page_size records)
 
-# Institutions (employer). Key: NVA/Cristin institution number (first part of e.g. 194.65.20.0).
-# Add the institutions you care about after checking the items by hand; unmapped ones are skipped.
+# Institutions (employer) and positions (qualifier on employer).
+# Build them with `python -m nvabot suggest-mappings`: it writes reports/org-items-suggestions.yaml and
+# reports/positions-suggestions.yaml from the NVA profiles of people on Wikidata. A QID is only filled in
+# when the name matches a Wikidata label exactly; open every QID before use, fix or null the rest.
+# Then either point to the reviewed files (paths relative to this config):
+#   org_items: reports/org-items-suggestions.yaml
+#   positions: reports/positions-suggestions.yaml
+# or list them inline. Keys: NVA/Cristin institution number (first part of e.g. 194.65.20.0) and the
+# NVA role label in lower case. Unmapped institutions and roles are skipped; null entries too.
 org_items: {}
 #  "194": Q...    # NTNU
-#  "185": Q...    # University of Oslo
-
-# Positions (qualifier on employer). Key: NVA role label in lower case (English or Bokmål).
-# Run `python -m nvabot suggest-positions` to get the labels used in NVA with candidate items.
 positions: {}
 #  "professor": Q...
-#  "associate professor": Q...
 
 policy:
   require_verified_person: true          # only use NVA profiles marked verified

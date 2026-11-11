@@ -20,7 +20,7 @@ person.
 | `works --create` | same, for NVA records with **no** item | a new item (see below) |
 | `handles` | items that already have an NVA handle (P1184) | same as `works` |
 | `doi-handles` | NVA records with DOI + handle (filter by `--institution`, `--since`, `--year-since`), matched by DOI | Handle (P1184) only |
-| `suggest-positions` | NVA role labels | writes `reports/positions-suggestions.yaml` with candidate items (no edits) |
+| `suggest-mappings` | institutions and roles in NVA profiles of linked people | writes `reports/org-items-suggestions.yaml` and `reports/positions-suggestions.yaml` with candidate items (no edits) |
 | `stats` | — | rebuilds `stats.json`; `--publish` updates the on-wiki stats and review pages |
 | `check` | — | read-only self-test of config, NVA, WDQS, NVA item, stop page |
 
@@ -52,8 +52,25 @@ Current NVA affiliations become *employer* (P108) for the institution, with the 
 true. Former affiliations are skipped unless `add_former_employers` is on (then *end time* = unknown value).
 Existing employer statements are extended with a missing position and an NVA reference, never duplicated; a
 statement with an end time while NVA says "current" is sent to review.
-Institutions are mapped in `org_items` (and/or a property in `org_id`), positions in `positions`; run
-`suggest-positions` to see which NVA role labels occur and check the proposed items before adding them.
+Employer edits need to know which Wikidata item is which NVA institution. NVA organisations carry no shared
+identifier (no ROR), so the mapping is built once and checked by a human:
+
+```bash
+python -m nvabot suggest-mappings            # samples 500 profiles; --limit 0 = all
+```
+
+This writes `reports/org-items-suggestions.yaml` and `reports/positions-suggestions.yaml`, most frequent first.
+A QID is filled in only when the NVA name matches a Wikidata label exactly (and only one item does); everything
+else is `null` with the candidates in a comment. Open every QID, fix or null the rest, then point the config to
+the files:
+
+```yaml
+org_items: reports/org-items-suggestions.yaml
+positions: reports/positions-suggestions.yaml
+```
+
+Unmapped or `null` institutions and roles are skipped. Without any mapping the bot logs a warning and makes no
+employer edits.
 
 ## Creating items (`works --create`)
 

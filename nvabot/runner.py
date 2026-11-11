@@ -13,7 +13,8 @@ from typing import Callable, Dict, Iterable, List, Optional, Sequence
 from . import stats as statsmod
 from .config import Config
 from .normalize import handle_key, normalize_doi, normalize_orcid
-from .nva import NvaClient, normalize_issn, record_doi, record_handles, record_issns
+from .nva import (NvaClient, institution_number, normalize_issn, record_doi, record_handles,
+                  record_issns)
 from dataclasses import replace
 
 from .normalize import title_similarity, wikidata_year
@@ -108,8 +109,10 @@ class Runner:
             org_map = self.reader.org_map(self.cfg.props.org_id) if self.cfg.props.org_id else {}
             org_map.update({str(k).split(".")[0]: v for k, v in (self.cfg["org_items"] or {}).items() if v})
             self.ctx.org_map = org_map
-            if not org_map:
-                log.warning("add_employer is on but no institutions are mapped (org_items / org_id)")
+            if not org_map and not self.mode.startswith("suggest"):
+                log.warning("add_employer is on but no institutions are mapped, so employer/position edits are "
+                            "skipped. Run `python -m nvabot suggest-mappings`, check %s and point 'org_items' "
+                            "in the config to it.", self.cfg.path("report_dir") / "org-items-suggestions.yaml")
         return mapping
 
     # ------------------------------------------------------------------ recording
@@ -470,26 +473,87 @@ class Runner:
             self.reader.remember(p.handle, handle_key(h), qid)
 
     # ------------------------------------------------------------------ helpers for humans
-    def run_suggest_positions(self, limit: Optional[int] = 500):
-        """Collect NVA role labels and propose Wikidata items for config 'positions' (no edits)."""
+    def run_suggest_mappings(self, limit: Optional[int] = 500):
+        """Propose 'org_items' and 'positions' from the NVA profiles of linked people (no edits).
+
+        Writes reports/org-items-suggestions.yaml and reports/positions-suggestions.yaml. A QID is
+        only filled in when a Wikidata label matches the NVA name exactly; everything else is null
+        with the candidates in a comment, so nothing unchecked can slip into the config.
+        """
         mapping = self._load_person_map()
-        counts: Counter = Counter()
+        institutions: Counter = Counter()
+        roles: Counter = Counter()
         for nid in sorted(mapping, key=lambda n: int(n) if n.isdigit() else 0)[:limit or None]:
             for aff in (self.nva.person(nid) or {}).get("affiliations") or []:
+                if aff.get("active") is not True and not self.cfg.policy.add_former_employers:
+                    continue
+                num = institution_number(aff.get("organization"))
+                if num:
+                    institutions[num] += 1
                 label = ((aff.get("role") or {}).get("labels") or {}).get("en")
                 if label:
-                    counts[label.strip()] += 1
-        out = self.cfg.path("report_dir") / "positions-suggestions.yaml"
-        known = self.ctx.positions
-        lines = ["# Review each line, keep only correct QIDs, then copy into config.yaml under 'positions:'"]
-        for label, n in counts.most_common():
-            if label.lower() in known:
-                lines.append(f'"{label.lower()}": {known[label.lower()]}   # already mapped, {n} affiliations')
+                    roles[label.strip()] += 1
+        report_dir = self.cfg.path("report_dir")
+        self._write_org_suggestions(institutions, report_dir / "org-items-suggestions.yaml")
+        self._write_position_suggestions(roles, report_dir / "positions-suggestions.yaml")
+
+    def _candidates(self, names: Dict[str, str]) -> List[dict]:
+        """Search Wikidata for each (language, name); exact label matches first."""
+        found: Dict[str, dict] = {}
+        for lang, name in names.items():
+            for h in self.reader.search_entities(name, lang, 5):
+                exact = str(h.get("label", "")).strip().lower() == name.strip().lower() or \
+                    str((h.get("match") or {}).get("text", "")).strip().lower() == name.strip().lower()
+                c = found.setdefault(h["id"], {"id": h["id"], "label": h.get("label", ""),
+                                              "description": h.get("description", ""), "exact": False})
+                c["exact"] |= exact
+        return sorted(found.values(), key=lambda c: not c["exact"])
+
+    @staticmethod
+    def _comment(text: str) -> str:
+        return " ".join(str(text).split()).replace("#", "")
+
+    def _write_org_suggestions(self, counts: Counter, out: Path):
+        known = self.ctx.org_map
+        lines = ["# Institutions (NVA/Cristin institution number -> Wikidata item) seen in NVA profiles of",
+                 "# people on Wikidata, most frequent first. Open each QID and check it before use.",
+                 "# 'null' = no exact name match; pick one of the candidates or leave it null (skipped).",
+                 "# Use: point 'org_items' in config.yaml to this file, or copy the lines under 'org_items:'."]
+        for num, n in counts.most_common():
+            if num in known:
+                lines.append(f'"{num}": {known[num]}   # already mapped; {n} affiliations')
                 continue
-            hits = self.reader.search_entities(label, "en", 3)
-            options = "; ".join(f"{h['id']} = {h.get('label', '')} ({h.get('description', '')})" for h in hits)
-            first = hits[0]["id"] if hits else "null"
-            lines.append(f'"{label.lower()}": {first}   # {n} affiliations; candidates: {options}')
+            org = self.nva.institution(num) or {}
+            labels = org.get("labels") or {}
+            names = {lang: labels[lang] for lang in ("nb", "en", "nn") if labels.get(lang)}
+            title = labels.get("en") or labels.get("nb") or labels.get("nn") or "?"
+            if org.get("acronym"):
+                title += f" ({org['acronym']})"
+            cands = self._candidates(names) if names else []
+            exact = [c for c in cands if c["exact"]]
+            choice = exact[0]["id"] if len(exact) == 1 else "null"
+            options = "; ".join(f"{c['id']} = {c['label']} – {c['description']}" for c in cands[:4]) or "none found"
+            note = "" if choice != "null" or not exact else " [several exact matches]"
+            lines.append(f'"{num}": {choice}   # {self._comment(title)}; {n} affiliations;{note} '
+                         f'candidates: {self._comment(options)}')
+        out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        log.info("wrote %d institutions to %s", len(counts), out)
+
+    def _write_position_suggestions(self, counts: Counter, out: Path):
+        known = self.ctx.positions
+        lines = ["# NVA role labels (lower case) -> Wikidata item for the position, most frequent first.",
+                 "# Open each QID and check it before use; 'null' = no exact match (skipped).",
+                 "# Use: point 'positions' in config.yaml to this file, or copy the lines under 'positions:'."]
+        for label, n in counts.most_common():
+            key = label.lower()
+            if key in known:
+                lines.append(f'"{key}": {known[key]}   # already mapped; {n} affiliations')
+                continue
+            cands = self._candidates({"en": label})
+            exact = [c for c in cands if c["exact"]]
+            choice = exact[0]["id"] if len(exact) == 1 else "null"
+            options = "; ".join(f"{c['id']} = {c['label']} – {c['description']}" for c in cands[:3]) or "none found"
+            lines.append(f'"{self._comment(key)}": {choice}   # {n} affiliations; candidates: {self._comment(options)}')
         out.write_text("\n".join(lines) + "\n", encoding="utf-8")
         log.info("wrote %d role labels to %s", len(counts), out)
 

@@ -133,6 +133,13 @@ class NvaClient:
             raise NvaError(f"unexpected JSON from {r.url}")
         return data
 
+    # -- organisations
+    def institution(self, number: str) -> Optional[dict]:
+        """Top-level NVA/Cristin institution, e.g. '194' -> /cristin/organization/194.0.0.0."""
+        if not str(number).isdigit():
+            raise NvaError(f"invalid institution number {number!r}")
+        return self._get(f"{self.base}/cristin/organization/{number}.0.0.0")
+
     # -- persons
     def person(self, person_id: str) -> Optional[dict]:
         if not str(person_id).isdigit():
