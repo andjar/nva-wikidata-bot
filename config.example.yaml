@@ -22,6 +22,12 @@ limits:
   nva_min_interval_seconds: 0.25         # politeness towards api.nva.unit.no
   sparql_min_interval_seconds: 1.0
   maxlag: 5
+  read_maxlag: null                      # reads don't need maxlag; writes use Pywikibot's write_maxlag
+  write_max_retries: 6                   # Pywikibot's own lag retries per edit (about 2-4 minutes)...
+  lag_pause_seconds: 300                 # ...then the bot pauses this long and tries again,
+  max_lag_pauses: 6                      # ...and stops cleanly after this many pauses in a row
+  max_consecutive_nva_errors: 10         # NVA errors in a row before the run stops
+  max_consecutive_not_public: 50         # hidden NVA profiles (401) in a row before the run stops
 
 wikidata:
   sparql_endpoints:

@@ -9,7 +9,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from .planner import Action
 
@@ -18,6 +18,10 @@ log = logging.getLogger("nvabot.writer")
 
 class EditConflict(RuntimeError):
     pass
+
+
+class ServerLagged(RuntimeError):
+    """Wikidata refused the write because of replication lag (maxlag); nothing was changed."""
 
 
 def build_claims_payload(entity: dict, actions: List[Action]) -> List[dict]:
@@ -55,7 +59,7 @@ def build_claims_payload(entity: dict, actions: List[Action]) -> List[dict]:
 
 
 class PywikibotWriter:
-    def __init__(self, site_code: str, assert_user: bool = True):
+    def __init__(self, site_code: str, assert_user: bool = True, max_retries: Optional[int] = 6):
         import pywikibot  # noqa: WPS433 (lazy import on purpose)
         from pywikibot.data import api
 
@@ -66,10 +70,14 @@ class PywikibotWriter:
         self.repo = site.data_repository() or site
         self.repo.login()
         self.assert_user = assert_user
+        self.max_retries = max_retries   # Pywikibot's own retries; longer lag is handled by Safety.lag_pause
         log.info("logged in to %s as %s", self.repo, self.repo.username())
 
     def _req(self, **params) -> dict:
-        return self._api.Request(site=self.repo, parameters=params).submit()
+        try:
+            return self._api.Request(site=self.repo, parameters=params, max_retries=self.max_retries).submit()
+        except self._pwb.exceptions.MaxlagTimeoutError as e:
+            raise ServerLagged(str(e)) from e
 
     def _write_params(self, **params) -> dict:
         params["token"] = self.repo.tokens["csrf"]

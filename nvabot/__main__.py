@@ -98,7 +98,8 @@ def main(argv=None) -> int:
         writer = None
         if args.publish:
             from .writer import PywikibotWriter
-            writer = PywikibotWriter(cfg["bot"]["site"], cfg["bot"].get("assert_user", True))
+            writer = PywikibotWriter(cfg["bot"]["site"], cfg["bot"].get("assert_user", True),
+                                     cfg["limits"]["write_max_retries"])
         publish_stats(cfg, State(cfg.path("state_db")), writer)
         log.info("stats written to %s", cfg.path("report_dir") / "stats.json")
         return 0
@@ -123,7 +124,8 @@ def main(argv=None) -> int:
         status = runner.execute(runner.run_suggest_mappings, args.limit)
     else:
         status = runner.execute(runner.run_handles, args.limit)
-    return 0 if status == "completed" or status.startswith("budget") else 1
+    # budget reached and server lag are normal stops for a scheduled job, not failures
+    return 0 if status == "completed" or status.startswith(("budget", "lagged")) else 1
 
 
 def run_check(cfg, log) -> int:

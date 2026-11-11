@@ -106,6 +106,17 @@ Once items carry handles, `handles` keeps them in sync with NVA. `works` also ad
 * **Politeness:** `maxlag=5`, Pywikibot's write throttle, a descriptive User-Agent, rate limits and retries with
   back-off for NVA and WDQS (honouring `Retry-After`), `assert=user` so it never edits logged out.
 
+## When Wikidata or NVA misbehave
+
+* **"Sleeping for … seconds" from Pywikibot** means Wikidata's replication lag is above `maxlag` (5 s) and the
+  write was refused; nothing was changed. Pywikibot retries a few times (`limits.write_max_retries`), then the
+  bot pauses `lag_pause_seconds`, re-reads the item and tries again. After `max_lag_pauses` pauses in a row it
+  stops with status `lagged` (exit code 0); continue later with `persons --resume`. Lag is never counted as a
+  failed edit and never raises `maxlag`.
+* **NVA 401/403 for a person** means the profile needs a login (people can hide their profile). It is skipped
+  and counted as `nva_profile_not_public`. 50 in a row, or 10 other NVA errors in a row, stop the run in case
+  NVA is down or blocking the bot.
+
 ## Logging and public stats
 
 * `logs/nvabot.log` – rotating application log.

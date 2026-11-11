@@ -25,6 +25,10 @@ class NvaError(RuntimeError):
     pass
 
 
+class NvaNotPublic(NvaError):
+    """NVA answered 401/403: the record needs a login (e.g. a person who has hidden their profile)."""
+
+
 # --------------------------------------------------------------------------- record helpers
 def person_id_from_uri(uri) -> Optional[str]:
     """'https://api.nva.unit.no/cristin/person/15120' -> '15120'."""
@@ -123,6 +127,8 @@ class NvaClient:
                              headers={"Accept": "application/json"})
         if r.status_code in (404, 410):
             return None
+        if r.status_code in (401, 403):
+            raise NvaNotPublic(f"NVA {r.status_code} (not public) for {r.url}")
         if r.status_code >= 400:
             raise NvaError(f"NVA {r.status_code} for {r.url}")
         try:

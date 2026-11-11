@@ -13,7 +13,7 @@ from typing import Callable, Dict, Iterable, List, Optional, Sequence
 from . import stats as statsmod
 from .config import Config
 from .normalize import handle_key, normalize_doi, normalize_orcid
-from .nva import (NvaClient, institution_number, normalize_issn, record_doi, record_handles,
+from .nva import (NvaClient, NvaError, NvaNotPublic, institution_number, normalize_issn, record_doi, record_handles,
                   record_issns)
 from dataclasses import replace
 
@@ -21,10 +21,10 @@ from .normalize import title_similarity, wikidata_year
 from .planner import (REVIEW_KINDS, Action, Context, CreateSettings, Policy, plan_link, plan_new_work,
                       plan_person, plan_work)
 from . import wbjson as wb
-from .safety import BudgetExhausted, CircuitOpen, Safety, StopRequested
+from .safety import BudgetExhausted, CircuitOpen, LagStop, Safety, StopRequested
 from .state import State
 from .wikidata import API_URLS, SparqlClient, WikidataReader, chunks
-from .writer import EditConflict, build_claims_payload
+from .writer import EditConflict, ServerLagged, build_claims_payload
 
 log = logging.getLogger("nvabot.runner")
 
@@ -43,18 +43,21 @@ class Runner:
         self.nva = NvaClient(cfg["nva"]["api_base"], ua, lim["nva_min_interval_seconds"], cfg["nva"]["page_size"],
                              max_pages=cfg["nva"]["max_pages"])
         self.sparql = SparqlClient(wd["sparql_endpoints"], ua, lim["sparql_min_interval_seconds"])
-        self.reader = WikidataReader(self.sparql, API_URLS[bot["site"]], ua, lim["maxlag"])
+        self.reader = WikidataReader(self.sparql, API_URLS[bot["site"]], ua, lim["read_maxlag"])
         self.writer = None
         if live:
             from .writer import PywikibotWriter
-            self.writer = PywikibotWriter(bot["site"], bot.get("assert_user", True))
+            self.writer = PywikibotWriter(bot["site"], bot.get("assert_user", True), lim["write_max_retries"])
         self.safety = Safety(self.reader, self.writer, live=live,
                              max_edits=min(max_edits or lim["max_edits_per_run"], lim["max_edits_per_run"]),
                              stop_page=bot["stop_page"], stop_on_talk=bot["stop_on_talk_message"],
                              check_every=lim["stop_check_every"],
                              max_consecutive_failures=lim["max_consecutive_failures"],
                              max_failure_ratio=lim["max_failure_ratio"], stop_file=str(cfg.path("stop_file")),
-                             unflagged_max_edits=lim["unflagged_max_edits"])
+                             unflagged_max_edits=lim["unflagged_max_edits"],
+                             lag_pause_seconds=lim["lag_pause_seconds"], max_lag_pauses=lim["max_lag_pauses"])
+        self._nva_errors_in_row = 0
+        self._not_public_in_row = 0
         self.batch_id = secrets.token_hex(5)
         self.run_id = self.state.start_run(mode, live, self.batch_id)
         self.counters: Counter = Counter()
@@ -153,13 +156,15 @@ class Runner:
             self._record(Action("conflict", qid, "", subject, "item missing, deleted or redirected"),
                          "seen", subject)
             return
-        for attempt in (1, 2):
+        conflicts, first = 0, True
+        while True:
             actions = plan(entity)
             edits = [a for a in actions if a.is_edit]
-            if attempt == 1:
+            if first:
                 for a in actions:
                     if not a.is_edit:
                         self._record(a, "seen", subject)
+                first = False
             if not edits:
                 return
             if not self.live:
@@ -172,10 +177,19 @@ class Runner:
             try:
                 revid = self.writer.edit_entity(qid, build_claims_payload(entity, edits), entity["lastrevid"],
                                                 self._summary(edits, subject))
+            except ServerLagged:
+                # Not a failure: Wikidata refused the write and nothing changed. Wait, re-read, re-plan.
+                self.counters["lag_pauses"] += 1
+                self.safety.lag_pause()
+                entity = self.reader.get_entities([qid]).get(qid)
+                if entity is None:
+                    return
+                continue
             except EditConflict:
+                conflicts += 1
                 log.warning("edit conflict on %s, reloading and re-planning", qid)
                 entity = self.reader.get_entities([qid]).get(qid)
-                if entity is None or attempt == 2:
+                if entity is None or conflicts >= 2:
                     for a in edits:
                         self._record(a, "failed", subject, message="edit conflict")
                     self.safety.failure()
@@ -194,6 +208,40 @@ class Runner:
                 self._record(a, "done", subject, revid)
                 self._remember(a)
             return
+
+    # ------------------------------------------------------------------ NVA person fetch
+    def _fetch_person(self, nid: str, qid: str = "") -> Optional[dict]:
+        """Fetch one NVA person; a single bad response never aborts the run.
+
+        Hidden profiles (401/403) are skipped. Many in a row, or repeated other errors, mean NVA is
+        down or blocking us - then the run stops instead of hammering the API.
+        """
+        lim = self.cfg["limits"]
+        subject = f"NVA person {nid}"
+        try:
+            person = self.nva.person(str(nid))
+        except NvaNotPublic:
+            self._not_public_in_row += 1
+            self.counters["nva_profile_not_public"] += 1
+            self._record(Action("skip", qid, self.cfg.props.nva_person_id, str(nid),
+                                "NVA profile not public (401)"), "seen", subject)
+            if self._not_public_in_row >= lim["max_consecutive_not_public"]:
+                raise CircuitOpen(f"{self._not_public_in_row} NVA profiles in a row refused (401/403) - "
+                                  "is NVA blocking the bot?")
+            return None
+        except NvaError as e:
+            self._nva_errors_in_row += 1
+            self.counters["nva_errors"] += 1
+            log.warning("NVA error for person %s: %s", nid, e)
+            if self._nva_errors_in_row >= lim["max_consecutive_nva_errors"]:
+                raise CircuitOpen(f"{self._nva_errors_in_row} NVA errors in a row - NVA may be down")
+            return None
+        self._nva_errors_in_row = 0
+        self._not_public_in_row = 0
+        if person is None:
+            self._record(Action("conflict", qid, self.cfg.props.nva_person_id, str(nid),
+                                "NVA person ID not found in NVA"), "seen", subject)
+        return person
 
     def _remember(self, a: Action):
         """Make values added in this run count for uniqueness checks immediately."""
@@ -220,11 +268,8 @@ class Runner:
             entities = self.reader.get_entities([q for _, q in chunk])
             for nid, qid in chunk:
                 subject = f"NVA person {nid}"
-                person = self.nva.person(str(nid))
-                if person is None:
-                    self._record(Action("conflict", qid, self.cfg.props.nva_person_id, str(nid),
-                                        "NVA person ID not found in NVA"), "seen", subject)
-                else:
+                person = self._fetch_person(str(nid), qid)
+                if person is not None:
                     self.process(qid, entities.get(qid), lambda e, p=person: plan_person(e, p, self.ctx), subject)
                 if not items:
                     self.state.set_cursor("persons", nid)
@@ -253,7 +298,7 @@ class Runner:
                     self._record(Action("conflict", qid, self.cfg.props.nva_person_id, nid,
                                         f"NVA person already linked to {mapping[nid]}"), "seen", subject)
                     continue
-                person = self.nva.person(nid)
+                person = self._fetch_person(nid, qid)
                 if person:
                     self.process(qid, entities.get(qid), lambda e, p=person: plan_link(e, p, self.ctx), subject)
 
@@ -431,7 +476,6 @@ class Runner:
 
     def _create(self, action: Action, record: dict, subject: str):
         rid = record["identifier"]
-        p = self.cfg.props
         if not self.live:
             action.qid = "NEW"
             self._record(action, "planned", subject)
@@ -442,19 +486,33 @@ class Runner:
         summary = (f"[[{self.cfg['bot']['run_info_page']}|NVA import]]: {action.reason} from NVA record {rid}")
         if self.cfg["bot"].get("editgroups"):
             summary += f" ([[:toollabs:editgroups/b/CB/{self.batch_id}|details]])"
-        try:
-            qid, revid = self.writer.create_entity(action.claim, summary)
-        except Exception as e:  # noqa: BLE001
-            msg = f"{type(e).__name__}: {e}"[:300]
-            if "label-with-description-conflict" in msg or "label-conflict" in msg:
-                self._record(Action("conflict", "", p.instance_of, rid,
-                                    "an item with the same label and description exists; not created"),
-                             "seen", subject)
-                return
-            log.exception("creating item for %s failed", rid)
-            self._record(action, "failed", subject, message=msg)
-            self.safety.failure()
+        while True:
+            try:
+                qid, revid = self.writer.create_entity(action.claim, summary)
+                break
+            except ServerLagged:
+                # maxlag is checked before anything is saved, so retrying cannot create a duplicate
+                self.counters["lag_pauses"] += 1
+                self.safety.lag_pause()
+                self.safety.before_edit()
+            except Exception as e:  # noqa: BLE001
+                return self._create_failed(action, rid, subject, e)
+        self._created_ok(action, record, rid, subject, qid, revid)
+
+    def _create_failed(self, action: Action, rid: str, subject: str, e: Exception):
+        """Called from inside an except block, so log.exception still has the traceback."""
+        p = self.cfg.props
+        msg = f"{type(e).__name__}: {e}"[:300]
+        if "label-with-description-conflict" in msg or "label-conflict" in msg:
+            self._record(Action("conflict", "", p.instance_of, rid,
+                                "an item with the same label and description exists; not created"),
+                         "seen", subject)
             return
+        log.exception("creating item for %s failed", rid)
+        self._record(action, "failed", subject, message=msg)
+        self.safety.failure()
+
+    def _created_ok(self, action: Action, record: dict, rid: str, subject: str, qid: str, revid: int):
         self.safety.success()
         self.created_this_run += 1
         self.counters["edits"] += 1
@@ -484,7 +542,7 @@ class Runner:
         institutions: Counter = Counter()
         roles: Counter = Counter()
         for nid in sorted(mapping, key=lambda n: int(n) if n.isdigit() else 0)[:limit or None]:
-            for aff in (self.nva.person(nid) or {}).get("affiliations") or []:
+            for aff in (self._fetch_person(nid, mapping[nid]) or {}).get("affiliations") or []:
                 if aff.get("active") is not True and not self.cfg.policy.add_former_employers:
                     continue
                 num = institution_number(aff.get("organization"))
@@ -594,6 +652,8 @@ class Runner:
             status = f"budget: {e}"
         except CircuitOpen as e:
             status = f"circuit breaker: {e}"
+        except LagStop as e:
+            status = f"lagged: {e}"
         except KeyboardInterrupt:
             status = "interrupted"
         except Exception as e:  # noqa: BLE001

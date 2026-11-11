@@ -74,7 +74,7 @@ class SparqlClient:
 
 
 class WikidataReader:
-    def __init__(self, sparql: SparqlClient, api_url: str, user_agent: str, maxlag: int = 5):
+    def __init__(self, sparql: SparqlClient, api_url: str, user_agent: str, maxlag: Optional[int] = None):
         self.sparql = sparql
         self.api_url = api_url
         self.session = make_session(user_agent)
@@ -83,7 +83,9 @@ class WikidataReader:
 
     # -- Action API
     def _api(self, **params) -> dict:
-        params.update(format="json", formatversion=2, maxlag=self.maxlag)
+        params.update(format="json", formatversion=2)
+        if self.maxlag:   # reads don't need maxlag; writes always use it (Pywikibot write_maxlag)
+            params["maxlag"] = self.maxlag
         for attempt in range(6):
             r = self.session.get(self.api_url, params=params, timeout=60)
             r.raise_for_status()

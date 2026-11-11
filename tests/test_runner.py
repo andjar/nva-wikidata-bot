@@ -271,3 +271,56 @@ def test_bad_mapping_file_is_rejected(cfg, tmp_path):
     (cfg.base_dir / "config.yaml").write_text(yaml.safe_dump(raw))
     with pytest.raises(Exception, match="not an item id"):
         Config.load(str(cfg.base_dir / "config.yaml"))
+
+
+# ------------------------------------------------------------------ lag and NVA errors
+from nvabot.nva import NvaError, NvaNotPublic
+from nvabot.writer import ServerLagged
+
+
+def test_server_lag_pauses_and_retries_without_failure(cfg, monkeypatch):
+    cfg.raw["limits"]["lag_pause_seconds"] = 0
+    real = FakeWriter.edit_entity
+    calls = {"n": 0}
+
+    def lagged_once(self, *a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ServerLagged("maxlag")
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(FakeWriter, "edit_entity", lagged_once)
+    r = runner_mod.Runner(cfg, "persons", live=True)
+    assert r.execute(r.run_persons) == "completed"
+    assert len(FakeWriter.edits) == 1 and r.counters["lag_pauses"] == 1
+    assert r.state.db.execute("SELECT COUNT(*) FROM actions WHERE status='failed'").fetchone()[0] == 0
+
+
+def test_persistent_lag_stops_cleanly(cfg, monkeypatch):
+    cfg.raw["limits"].update(lag_pause_seconds=0, max_lag_pauses=2)
+    monkeypatch.setattr(FakeWriter, "edit_entity", lambda self, *a, **k: (_ for _ in ()).throw(ServerLagged("x")))
+    r = runner_mod.Runner(cfg, "persons", live=True)
+    status = r.execute(r.run_persons)
+    assert status.startswith("lagged")
+    assert r.state.db.execute("SELECT COUNT(*) FROM actions WHERE status='failed'").fetchone()[0] == 0
+    assert r.state.get_cursor("persons") != "15120"         # lagged item not marked done; --resume retries it
+
+
+def test_hidden_nva_profile_is_skipped_not_fatal(cfg, monkeypatch):
+    def person(self, pid):
+        if pid == "11111":
+            raise NvaNotPublic("401")
+        return copy.deepcopy(PERSON) if pid == "15120" else None
+    monkeypatch.setattr(FakeNva, "person", person)
+    r = runner_mod.Runner(cfg, "persons", live=False)
+    assert r.execute(r.run_persons) == "completed"
+    assert r.counters["nva_profile_not_public"] == 1
+    assert "planned,Q1,add_claim,P496" in r.report_path.read_text()   # the other person still processed
+    assert r.state.db.execute("SELECT COUNT(*) FROM review WHERE value='11111'").fetchone()[0] == 0
+
+
+def test_many_nva_errors_in_a_row_stop_the_run(cfg, monkeypatch):
+    cfg.raw["limits"]["max_consecutive_nva_errors"] = 2
+    monkeypatch.setattr(FakeNva, "person", lambda self, pid: (_ for _ in ()).throw(NvaError("NVA 502")))
+    r = runner_mod.Runner(cfg, "persons", live=False)
+    assert r.execute(r.run_persons).startswith("circuit breaker")
