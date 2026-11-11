@@ -50,6 +50,10 @@ class FakeSparql:
 
 class FakeReader:
     entities = {}
+    lag = 0.0
+
+    def current_lag(self):
+        return self.lag, "wikibase-queryservice"
     title_hits = []
 
     def search_titles(self, title, limit=10):
@@ -87,6 +91,7 @@ class FakeReader:
 
 
 class FakeWriter:
+    maxlag = 5
     created = []
     stop_text = "run"
     edits = []
@@ -143,7 +148,10 @@ def cfg(tmp_path, monkeypatch):
     FakeReader.entities = {"Q1": person_entity(), "Q100": work_entity()}
     FakeWriter.edits, FakeWriter.pages, FakeWriter.stop_text, FakeWriter.created = [], {}, "run", []
     FakeReader.title_hits = []
-    return Config.load(str(p))
+    FakeReader.lag = 0.0
+    raw_cfg = Config.load(str(p))
+    raw_cfg.raw["limits"]["lag_poll_seconds"] = 0
+    return raw_cfg
 
 
 @pytest.fixture
@@ -279,7 +287,6 @@ from nvabot.writer import ServerLagged
 
 
 def test_server_lag_pauses_and_retries_without_failure(cfg, monkeypatch):
-    cfg.raw["limits"]["lag_pause_seconds"] = 0
     real = FakeWriter.edit_entity
     calls = {"n": 0}
 
@@ -292,14 +299,16 @@ def test_server_lag_pauses_and_retries_without_failure(cfg, monkeypatch):
     monkeypatch.setattr(FakeWriter, "edit_entity", lagged_once)
     r = runner_mod.Runner(cfg, "persons", live=True)
     assert r.execute(r.run_persons) == "completed"
-    assert len(FakeWriter.edits) == 1 and r.counters["lag_pauses"] == 1
+    assert len(FakeWriter.edits) == 1 and r.counters["lag_refusals"] == 1
     assert r.state.db.execute("SELECT COUNT(*) FROM actions WHERE status='failed'").fetchone()[0] == 0
 
 
 def test_persistent_lag_stops_cleanly(cfg, monkeypatch):
-    cfg.raw["limits"].update(lag_pause_seconds=0, max_lag_pauses=2)
-    monkeypatch.setattr(FakeWriter, "edit_entity", lambda self, *a, **k: (_ for _ in ()).throw(ServerLagged("x")))
-    r = runner_mod.Runner(cfg, "persons", live=True)
+    def refuse(self, *a, **k):
+        FakeReader.lag = 12.0            # lag rises after the first attempt
+        raise ServerLagged("x")
+    monkeypatch.setattr(FakeWriter, "edit_entity", refuse)
+    r = runner_mod.Runner(cfg, "persons", live=True, max_lag_wait=0)
     status = r.execute(r.run_persons)
     assert status.startswith("lagged")
     assert r.state.db.execute("SELECT COUNT(*) FROM actions WHERE status='failed'").fetchone()[0] == 0
@@ -324,3 +333,21 @@ def test_many_nva_errors_in_a_row_stop_the_run(cfg, monkeypatch):
     monkeypatch.setattr(FakeNva, "person", lambda self, pid: (_ for _ in ()).throw(NvaError("NVA 502")))
     r = runner_mod.Runner(cfg, "persons", live=False)
     assert r.execute(r.run_persons).startswith("circuit breaker")
+
+
+
+def test_high_lag_before_start_means_no_edit_attempts(cfg, monkeypatch):
+    FakeReader.lag = 15.0
+    tried = []
+    monkeypatch.setattr(FakeWriter, "edit_entity", lambda self, *a, **k: tried.append(a))
+    r = runner_mod.Runner(cfg, "persons", live=True, max_lag_wait=0)
+    status = r.execute(r.run_persons)
+    assert status.startswith("lagged") and "15 s" in status and tried == []
+
+
+def test_waits_until_lag_drops(cfg, monkeypatch):
+    readings = iter([9.0, 7.0, 3.0])
+    monkeypatch.setattr(FakeReader, "current_lag", lambda self: (next(readings), "wikibase-queryservice"))
+    r = runner_mod.Runner(cfg, "persons", live=True, max_lag_wait=10)
+    assert r.execute(r.run_persons) == "completed"
+    assert len(FakeWriter.edits) == 1 and r.counters["lag_waits"] == 2

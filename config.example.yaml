@@ -21,11 +21,15 @@ limits:
   max_failure_ratio: 0.2                 # circuit breaker over the last 50 edits
   nva_min_interval_seconds: 0.25         # politeness towards api.nva.unit.no
   sparql_min_interval_seconds: 1.0
-  maxlag: 5
+  maxlag: 5                              # only used if Pywikibot's write_maxlag is not set
   read_maxlag: null                      # reads don't need maxlag; writes use Pywikibot's write_maxlag
-  write_max_retries: 6                   # Pywikibot's own lag retries per edit (about 2-4 minutes)...
-  lag_pause_seconds: 300                 # ...then the bot pauses this long and tries again,
-  max_lag_pauses: 6                      # ...and stops cleanly after this many pauses in a row
+  # Wikidata's lag includes Query Service lag and can stay above 5 s for hours. The bot then waits:
+  # it checks the lag before the first edit and after every refused write, polls every
+  # lag_poll_seconds, continues as soon as lag <= maxlag, and stops cleanly (status 'lagged')
+  # after max_lag_wait_minutes. Override per run with --max-lag-wait MINUTES.
+  write_max_retries: 6                   # Pywikibot's own retries per refused write (a few minutes)
+  lag_poll_seconds: 60
+  max_lag_wait_minutes: 60
   max_consecutive_nva_errors: 10         # NVA errors in a row before the run stops
   max_consecutive_not_public: 50         # hidden NVA profiles (401) in a row before the run stops
 

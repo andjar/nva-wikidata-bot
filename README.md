@@ -108,11 +108,14 @@ Once items carry handles, `handles` keeps them in sync with NVA. `works` also ad
 
 ## When Wikidata or NVA misbehave
 
-* **"Sleeping for … seconds" from Pywikibot** means Wikidata's replication lag is above `maxlag` (5 s) and the
-  write was refused; nothing was changed. Pywikibot retries a few times (`limits.write_max_retries`), then the
-  bot pauses `lag_pause_seconds`, re-reads the item and tries again. After `max_lag_pauses` pauses in a row it
-  stops with status `lagged` (exit code 0); continue later with `persons --resume`. Lag is never counted as a
-  failed edit and never raises `maxlag`.
+* **Wikidata lag.** Wikidata refuses bot writes while its lag is above `maxlag` (5 s, the standard value).
+  Since 2026 that lag includes Query Service update lag and can stay above 5 s for hours
+  ([T421642](https://phabricator.wikimedia.org/T421642)). The bot checks the lag before the first edit and after
+  every refused write, logs it (`Wikidata lag is 12 s … waiting`), polls every minute and continues as soon as it
+  drops. After `max_lag_wait_minutes` (60; `--max-lag-wait MINUTES` per run, 360 in the scheduled jobs) it stops
+  with status `lagged` (exit code 0); continue later with `--resume`. `python -m nvabot check` shows the current
+  lag. Lag never counts as a failed edit. Raising `write_maxlag` above 5 makes the bot edit while Wikidata is
+  asking bots to hold back; ask on the bot request or Project chat before doing that.
 * **NVA 401/403 for a person** means the profile needs a login (people can hide their profile). It is skipped
   and counted as `nva_profile_not_public`. 50 in a row, or 10 other NVA errors in a row, stop the run in case
   NVA is down or blocking the bot.

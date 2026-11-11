@@ -50,3 +50,31 @@ def test_ids():
     assert person_id_from_uri("https://api.nva.unit.no/cristin/person/15120") == "15120"
     assert person_id_from_uri("https://evil.example/x") is None
     assert institution_number("https://api.nva.unit.no/cristin/organization/185.53.44.12") == "185"
+
+
+def test_current_lag_parsing():
+    from nvabot.wikidata import WikidataReader
+
+    class Resp:
+        def __init__(self, data):
+            self.data = data
+
+        def json(self):
+            return self.data
+
+    class Session:
+        def __init__(self, data):
+            self.data = data
+
+        def get(self, *a, **k):
+            return Resp(self.data)
+
+    r = WikidataReader.__new__(WikidataReader)
+    r.api_url = "https://www.wikidata.org/w/api.php"
+    r.session = Session({"error": {"code": "maxlag", "info": "Waiting for all: 12.4 seconds lagged.",
+                                   "host": "all", "lag": 12.4, "type": "wikibase-queryservice"}})
+    assert r.current_lag() == (12.4, "wikibase-queryservice")
+    r.session = Session({"error": {"code": "maxlag", "info": "Waiting for db1: 7 seconds lagged."}})
+    assert r.current_lag() == (7.0, "")
+    r.session = Session({"batchcomplete": True, "query": {}})
+    assert r.current_lag() == (0.0, "")

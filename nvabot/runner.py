@@ -35,7 +35,8 @@ NICE = {"orcid": "ORCID", "doi": "DOI", "handle": "Handle", "nva_person_id": "NV
 
 
 class Runner:
-    def __init__(self, cfg: Config, mode: str, *, live: bool, max_edits: Optional[int] = None):
+    def __init__(self, cfg: Config, mode: str, *, live: bool, max_edits: Optional[int] = None,
+                 max_lag_wait: Optional[float] = None):
         self.cfg, self.mode, self.live = cfg, mode, live
         bot, lim, wd = cfg["bot"], cfg["limits"], cfg["wikidata"]
         ua = bot["user_agent"]
@@ -55,7 +56,10 @@ class Runner:
                              max_consecutive_failures=lim["max_consecutive_failures"],
                              max_failure_ratio=lim["max_failure_ratio"], stop_file=str(cfg.path("stop_file")),
                              unflagged_max_edits=lim["unflagged_max_edits"],
-                             lag_pause_seconds=lim["lag_pause_seconds"], max_lag_pauses=lim["max_lag_pauses"])
+                             maxlag=(self.writer.maxlag if self.writer and self.writer.maxlag else lim["maxlag"]),
+                             lag_poll_seconds=lim["lag_poll_seconds"],
+                             max_lag_wait_minutes=(max_lag_wait if max_lag_wait is not None
+                                                   else lim["max_lag_wait_minutes"]))
         self._nva_errors_in_row = 0
         self._not_public_in_row = 0
         self.batch_id = secrets.token_hex(5)
@@ -179,7 +183,7 @@ class Runner:
                                                 self._summary(edits, subject))
             except ServerLagged:
                 # Not a failure: Wikidata refused the write and nothing changed. Wait, re-read, re-plan.
-                self.counters["lag_pauses"] += 1
+                self.counters["lag_refusals"] += 1
                 self.safety.lag_pause()
                 entity = self.reader.get_entities([qid]).get(qid)
                 if entity is None:
@@ -492,7 +496,7 @@ class Runner:
                 break
             except ServerLagged:
                 # maxlag is checked before anything is saved, so retrying cannot create a duplicate
-                self.counters["lag_pauses"] += 1
+                self.counters["lag_refusals"] += 1
                 self.safety.lag_pause()
                 self.safety.before_edit()
             except Exception as e:  # noqa: BLE001
@@ -661,6 +665,8 @@ class Runner:
             status = f"error: {type(e).__name__}: {e}"[:300]
         finally:
             self.counters["nva_requests"] = self.nva.requests_made
+            if self.safety.lag_waits:
+                self.counters["lag_waits"] = self.safety.lag_waits
             self.state.finish_run(self.run_id, status, dict(self.counters))
             for f in self._files:
                 f.close()

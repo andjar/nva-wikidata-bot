@@ -128,6 +128,28 @@ class WikidataReader:
                          type="item", limit=limit)
         return data.get("search", [])
 
+    def current_lag(self) -> Tuple[Optional[float], str]:
+        """Wikidata's current maxlag value in seconds and what causes it (maxlag=-1 always reports it).
+
+        On Wikidata this includes Query Service update lag, not only database replication.
+        Returns (None, "") if it cannot be measured.
+        """
+        try:
+            r = self.session.get(self.api_url, params={"action": "query", "titles": "Q1", "format": "json",
+                                                       "formatversion": 2, "maxlag": -1}, timeout=30)
+            err = (r.json() or {}).get("error") or {}
+        except Exception as e:  # noqa: BLE001
+            log.warning("could not measure Wikidata lag: %s", e)
+            return None, ""
+        if err.get("code") != "maxlag":
+            return 0.0, ""
+        lag = err.get("lag")
+        if lag is None:
+            m = re.search(r"([\d.]+) seconds? lagged", str(err.get("info", "")))
+            lag = m.group(1) if m else None
+        kind = str(err.get("type") or err.get("host") or "")
+        return (float(lag) if lag is not None else None), kind
+
     def page_text(self, title: str) -> Optional[str]:
         data = self._api(action="query", prop="revisions", titles=title, rvprop="content", rvslots="main")
         pages = data.get("query", {}).get("pages") or []

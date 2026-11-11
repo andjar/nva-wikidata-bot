@@ -30,7 +30,7 @@ class Safety:
     def __init__(self, reader, writer, *, live: bool, max_edits: int, stop_page: Optional[str],
                  stop_on_talk: bool, check_every: int, max_consecutive_failures: int,
                  max_failure_ratio: float, stop_file: str, unflagged_max_edits: int,
-                 lag_pause_seconds: int = 300, max_lag_pauses: int = 12):
+                 maxlag: float = 5, lag_poll_seconds: int = 60, max_lag_wait_minutes: float = 60):
         self.reader, self.writer = reader, writer
         self.live = live
         self.max_edits = max_edits
@@ -45,9 +45,10 @@ class Safety:
         self.attempts = 0
         self.consecutive_failures = 0
         self.window = deque(maxlen=50)
-        self.lag_pause_seconds = lag_pause_seconds
-        self.max_lag_pauses = max_lag_pauses
-        self.lag_pauses = 0
+        self.maxlag = maxlag
+        self.lag_poll_seconds = lag_poll_seconds
+        self.max_lag_wait = max_lag_wait_minutes * 60
+        self.lag_waits = 0
 
     def preflight(self) -> None:
         """Checks before the first edit of a live run."""
@@ -60,6 +61,7 @@ class Safety:
                         self.unflagged_max_edits)
             self.max_edits = self.unflagged_max_edits
         self.check()
+        self.wait_for_lag()
 
     def check(self) -> None:
         if os.path.exists(self.stop_file):
@@ -78,24 +80,43 @@ class Safety:
             self.check()
         self.attempts += 1
 
-    def lag_pause(self) -> None:
-        """Wikidata is lagged: wait (not a failure), or stop the run after too many pauses."""
-        self.lag_pauses += 1
-        if self.lag_pauses > self.max_lag_pauses:
-            raise LagStop(f"Wikidata still lagged after {self.max_lag_pauses} pauses in a row; try again later")
-        log.warning("Wikidata is lagged (maxlag); pausing %ds (pause %d of %d)",
-                    self.lag_pause_seconds, self.lag_pauses, self.max_lag_pauses)
-        deadline = time.monotonic() + self.lag_pause_seconds
-        while time.monotonic() < deadline:
-            if os.path.exists(self.stop_file):
-                raise StopRequested(f"local stop file {self.stop_file} exists")
-            time.sleep(min(10, max(0, deadline - time.monotonic())))
-        self.check()
+    def wait_for_lag(self) -> None:
+        """Wait until Wikidata's lag is at or below our maxlag, polling; stop the run after max_lag_wait.
+
+        Called before the first edit and whenever Wikidata refuses a write because of lag. Waiting is
+        not a failure. The STOP file is honoured while waiting; stop page and talk page every 5 minutes.
+        """
+        started = time.monotonic()
+        last_check = started
+        reported = False
+        while True:
+            lag, kind = self.reader.current_lag()
+            if lag is None or lag <= self.maxlag:
+                if reported:
+                    log.info("Wikidata lag is %s s - continuing", "unknown" if lag is None else f"{lag:.0f}")
+                return
+            waited = time.monotonic() - started
+            if waited >= self.max_lag_wait:
+                raise LagStop(f"Wikidata lag still {lag:.0f} s (limit {self.maxlag} s) after "
+                              f"{waited / 60:.0f} min; try again later")
+            log.warning("Wikidata lag is %.0f s%s, above the %d s limit - waiting (%.0f of max %.0f min)",
+                        lag, f" ({kind})" if kind else "", self.maxlag, waited / 60, self.max_lag_wait / 60)
+            reported = True
+            self.lag_waits += 1
+            deadline = time.monotonic() + self.lag_poll_seconds
+            while time.monotonic() < deadline:
+                if os.path.exists(self.stop_file):
+                    raise StopRequested(f"local stop file {self.stop_file} exists")
+                time.sleep(min(10, max(0, deadline - time.monotonic())))
+            if time.monotonic() - last_check >= 300:
+                self.check()
+                last_check = time.monotonic()
+
+    lag_pause = wait_for_lag   # used after a write was refused because of lag
 
     def success(self) -> None:
         self.edits += 1
         self.consecutive_failures = 0
-        self.lag_pauses = 0
         self.window.append(True)
 
     def failure(self) -> None:

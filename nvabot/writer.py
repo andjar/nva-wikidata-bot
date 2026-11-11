@@ -73,6 +73,12 @@ class PywikibotWriter:
         self.max_retries = max_retries   # Pywikibot's own retries; longer lag is handled by Safety.lag_pause
         log.info("logged in to %s as %s", self.repo, self.repo.username())
 
+    @property
+    def maxlag(self) -> Optional[float]:
+        """The maxlag Pywikibot sends with writes (user-config write_maxlag)."""
+        cfg = self._pwb.config
+        return getattr(cfg, "write_maxlag", None) or getattr(cfg, "maxlag", None)
+
     def _req(self, **params) -> dict:
         try:
             return self._api.Request(site=self.repo, parameters=params, max_retries=self.max_retries).submit()

@@ -52,6 +52,8 @@ def main(argv=None) -> int:
         p.add_argument("--live", action="store_true", help="really edit Wikidata (default: dry run)")
         p.add_argument("--max-edits", type=int, help="lower the edit budget for this run")
         p.add_argument("--limit", type=int, help="process at most N items/records")
+        p.add_argument("--max-lag-wait", type=float, metavar="MINUTES",
+                       help="how long to wait for Wikidata lag to drop before stopping (default from config)")
 
     sub.add_parser("check", help="validate config and test read access")
     p = sub.add_parser("persons", help="enrich items that have an NVA person ID (ORCID, employer)")
@@ -108,7 +110,8 @@ def main(argv=None) -> int:
         print("--create needs create.enabled: true in the config", file=sys.stderr)
         return 2
     from .runner import Runner
-    runner = Runner(cfg, args.command, live=getattr(args, "live", False), max_edits=getattr(args, "max_edits", None))
+    runner = Runner(cfg, args.command, live=getattr(args, "live", False), max_edits=getattr(args, "max_edits", None),
+                    max_lag_wait=getattr(args, "max_lag_wait", None))
     log.info("run %s: %s (%s)", runner.run_id, args.command, "LIVE" if runner.live else "dry run")
     if args.command == "persons":
         status = runner.execute(runner.run_persons, args.item, args.limit, args.resume)
@@ -150,6 +153,13 @@ def run_check(cfg, log) -> int:
         ok &= bool(nva_item)
         mapping, problems = reader.nva_person_map(p.nva_person_id)
         log.info("Wikidata items with NVA person ID: %d (%d problems)", len(mapping), len(problems))
+        lag, kind = reader.current_lag()
+        limit = cfg["limits"]["maxlag"]
+        if lag is None:
+            log.warning("Wikidata lag: could not be measured")
+        else:
+            log.info("Wikidata lag: %.0f s%s (bot edits only when <= %s s)%s", lag, f" ({kind})" if kind else "",
+                     limit, "" if lag <= limit else " - edits would wait now")
         stop = reader.page_text(cfg["bot"]["stop_page"])
         log.info("stop page [[%s]]: %r", cfg["bot"]["stop_page"], (stop or "MISSING").strip()[:40])
         ok &= bool(stop and stop.strip().lower() in ("run", "go", "on"))
