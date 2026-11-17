@@ -106,7 +106,8 @@ def test_existing_employer_gets_position_and_reference():
 
 
 def test_existing_employer_complete_is_skipped_and_end_time_respected():
-    full = claim(wb.item_snak("P108", "Q34433"), qualifiers=[wb.item_snak("P2868", "Q121594")],
+    full = claim(wb.item_snak("P108", "Q34433"),
+                 qualifiers=[wb.item_snak("P2868", "Q121594"), wb.time_snak("P585", "+2026-11-01T00:00:00Z", 11)],
                  references=nva_ref())
     assert not [a for a in employer_actions(person_entity([full])) if a.is_edit]
     ended = claim(wb.item_snak("P108", "Q34433"), qualifiers=[wb.time_snak("P582", "+2020-00-00T00:00:00Z", 9)])
@@ -239,3 +240,21 @@ def test_new_item_guards():
     c = create_ctx()
     c.person_map = {}
     assert "linked" in plan_new_work(record(), c, "Q1").reason
+
+
+
+def test_point_in_time_on_current_employment():
+    added = next(a for a in employer_actions(person_entity()) if a.kind == "add_claim")
+    pit = added.claim["qualifiers"]["P585"][0]
+    assert wb.snak_value(pit)["time"] == "+2026-11-04T00:00:00Z" and wb.snak_value(pit)["precision"] == 11
+    # former employment gets end time = unknown value, never point in time
+    old = next(a for a in employer_actions(person_entity(), add_former_employers=True) if a.value == "Q2000")
+    assert "P585" not in old.claim["qualifiers"]
+    # an existing undated statement gets it; one with any date qualifier does not
+    upd = [a for a in employer_actions(person_entity([claim(wb.item_snak("P108", "Q34433"))]))
+           if a.kind == "update_claim"]
+    assert "P585" in {q["property"] for q in upd[0].qualifiers}
+    dated = claim(wb.item_snak("P108", "Q34433"), qualifiers=[wb.time_snak("P580", "+2015-00-00T00:00:00Z", 9)])
+    upd = [a for a in employer_actions(person_entity([dated])) if a.kind == "update_claim"]
+    assert "P585" not in {q["property"] for q in upd[0].qualifiers}
+    assert employer_actions(person_entity(), add_point_in_time=False)[0].claim.get("qualifiers", {}).get("P585") is None

@@ -38,6 +38,9 @@ page (P854), and *retrieved* (P813).
 * **Identifier already on another item →** no edit; reported as a possible duplicate item.
 * **Two independent signals for works.** A DOI/handle match must also agree on title (similarity ≥ 0.8) and year (±1),
   otherwise nothing is written for that item.
+* **Names are compared word by word, never by edit distance:** identical surname; given names in order, full
+  names equal or an initial matching the first letter; a bare surname never matches. "A. Nobel" = "Alfred Nobel",
+  "Anna Nobel" ≠ "Alfred Nobel", "Olfred Nabel" ≠ "Alfred Nobel".
 * **Author links (paper → person, P50)** are made only through the NVA person ID → QID link, never twice:
   a matching author name string is converted into P50 (keeping its series ordinal and the name as *object named as*);
   otherwise P50 is added at the NVA position if that position is free in the author list; anything else goes to review.
@@ -48,8 +51,9 @@ page (P854), and *retrieved* (P813).
 ## Employer and position
 
 Current NVA affiliations become *employer* (P108) for the institution, with the NVA role as *subject has role*
-(P2868) qualifier. NVA has no dates, so none are invented; the reference's *retrieved* date records when it was
-true. Former affiliations are skipped unless `add_former_employers` is on (then *end time* = unknown value).
+(P2868) qualifier. NVA has no start or end dates, so none are invented; instead current employment gets
+*point in time* (P585) = the day NVA was read. It is set once (no weekly churn) and never added to a statement
+that already has a start, end or point in time. Former affiliations are skipped unless `add_former_employers` is on (then *end time* = unknown value).
 Existing employer statements are extended with a missing position and an NVA reference, never duplicated; a
 statement with an end time while NVA says "current" is sent to review.
 Employer edits need to know which Wikidata item is which NVA institution. NVA organisations carry no shared

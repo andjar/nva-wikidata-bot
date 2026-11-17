@@ -10,7 +10,7 @@ import calendar
 import re
 import unicodedata
 from difflib import SequenceMatcher
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 # --------------------------------------------------------------------------- ORCID
 ORCID_RE = re.compile(r"^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$")
@@ -89,35 +89,72 @@ def fold(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def split_name(name: str) -> Tuple[str, str]:
-    """Return (surname key, first initial) for common author-name forms.
+def _is_initials_block(token: str, all_caps: bool) -> bool:
+    """'IK', 'I.K.', 'J.-P.', 'A' - upper-case initials, possibly run together (Vancouver style)."""
+    letters = token.replace(".", "").replace("-", "")
+    if not (1 <= len(letters) <= 3 and letters.isalpha() and letters.isupper()):
+        return False
+    # In an all-caps name ("IDA BOS-HAUGEN") only dotted or single letters are initials.
+    return not all_caps or "." in token or len(letters) == 1
 
-    Handles "Ida Kristin Bos-Haugen", "Bos-Haugen, Ida K.", "I. K. Bos-Haugen"
-    and Vancouver style "Bos-Haugen IK".
+
+def _surname_key(text: str) -> str:
+    return fold(text).replace("-", "").replace(" ", "")
+
+
+def _given_tokens(text: str, all_caps: bool) -> List[str]:
+    """Given names as a list of full names and single-letter initials, in order."""
+    out: List[str] = []
+    for part in text.split():
+        if _is_initials_block(part, all_caps):
+            out += [fold(ch) for ch in part if ch.isalpha()]
+        else:
+            out += [t for t in fold(part).replace("-", " ").split() if t]
+    return out
+
+
+def parse_name(name: str) -> Tuple[str, List[str]]:
+    """(surname key, given-name tokens) for common author-name forms.
+
+    "Ida Kristin Bos-Haugen", "Bos-Haugen, Ida K.", "I. K. Bos-Haugen", "Bos-Haugen IK",
+    "Jean-Pierre Dupont" / "J.-P. Dupont" / "Dupont JP".
     """
-    if not name:
-        return "", ""
-    if "," in name:
-        last, first = name.split(",", 1)
-        first_tokens = fold(first).split()
-        return fold(last).replace("-", "").replace(" ", ""), (first_tokens[0][0] if first_tokens else "")
-    tokens = fold(name).split()
-    if not tokens:
-        return "", ""
-    if len(tokens) == 1:
-        return tokens[0].replace("-", ""), ""
-    if len(tokens[-1]) <= 2 and len(tokens[0]) > 2:  # surname first, trailing initials
-        return tokens[0].replace("-", ""), tokens[-1][0]
-    return tokens[-1].replace("-", ""), tokens[0][0]
+    raw = unicodedata.normalize("NFC", name or "").strip()
+    if not raw:
+        return "", []
+    all_caps = not any(c.islower() for c in raw)
+    if "," in raw:
+        last, first = raw.split(",", 1)
+        return _surname_key(last), _given_tokens(first, all_caps)
+    parts = raw.split()
+    if len(parts) == 1:
+        return _surname_key(parts[0]), []
+    # Vancouver style: surname first, initials last ("Bos-Haugen IK")
+    if _is_initials_block(parts[-1], all_caps) and not _is_initials_block(parts[0], all_caps):
+        return _surname_key(" ".join(parts[:-1])), _given_tokens(parts[-1], all_caps)
+    return _surname_key(parts[-1]), _given_tokens(" ".join(parts[:-1]), all_caps)
 
 
 def names_match(a: str, b: str) -> bool:
-    """Conservative match: identical surname and compatible first initial."""
-    la, fa = split_name(a)
-    lb, fb = split_name(b)
-    if not la or la != lb:
+    """Word-by-word name comparison, never edit distance.
+
+    The surname must be identical (ignoring case, accents and hyphens). Given names are compared
+    in order, word by word: two full names must be equal, an initial must equal the first letter
+    of the other name. Extra given names on one side are allowed ("A. Nobel" = "Alfred Bernhard
+    Nobel"); a bare surname never matches. So "A. Nobel" and "A. B. Nobel" match "Alfred Nobel",
+    while "Anna Nobel", "A. C. Nobel" (vs "Alfred Bernhard Nobel") and "Olfred Nabel" do not.
+    """
+    la, ga = parse_name(a)
+    lb, gb = parse_name(b)
+    if not la or la != lb or not ga or not gb:
         return False
-    return not fa or not fb or fa == fb
+    for x, y in zip(ga, gb):
+        if len(x) == 1 or len(y) == 1:
+            if x[0] != y[0]:
+                return False
+        elif x != y:
+            return False
+    return True
 
 
 def title_key(title: str) -> str:

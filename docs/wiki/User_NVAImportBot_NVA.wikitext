@@ -38,8 +38,10 @@ If an identical statement already exists, the reference is added to it instead o
 : If the item has a different value for {{P|496}} or {{P|356}}, or the value is already used on another item, nothing is written and the case is listed at [[User:NVAImportBot/NVA/Review]].
 ; Authors
 : {{P|50}} is only added for contributors whose NVA person ID is on exactly one Wikidata item. A matching {{P|2093}} is converted (series ordinal kept, name kept as {{P|1932}}). Otherwise {{P|50}} is added only if the NVA position in the author list is free.
+; Name matching
+: No fuzzy or edit-distance matching. The surname must be identical (ignoring case, accents and hyphens); given names are compared word by word in order: full names must be equal, an initial must match the first letter of the other name, extra given names on one side are allowed. "A. Nobel" and "A. B. Nobel" match "Alfred Nobel"; "Anna Nobel", "Olfred Nabel" and a bare "Nobel" do not. If a name matches more than one author string, nothing is converted and the case is reported.
 ; Employer
-: NVA has no start or end dates. Current affiliations are added without dates; the reference's {{P|813}} says when it was true. Former affiliations are not added. An existing employer statement gets a missing position qualifier and a reference, never a duplicate. Institutions and positions are mapped by hand-checked lists in the bot configuration.
+: NVA has no start or end dates. Current affiliations get {{P|585}} = the day NVA was read (set once, not refreshed every week); statements that already have {{P|580}}, {{P|582}} or {{P|585}} are not given another date. Former affiliations are not added. An existing employer statement gets a missing position qualifier and a reference, never a duplicate. Institutions and positions are mapped by hand-checked lists in the bot configuration.
 ; Handles
 : The NVA handle is added when the item has no handle, or already has a handle of the same NVA record. Items with an unrelated handle are left alone and reported.
 

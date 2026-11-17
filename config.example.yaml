@@ -97,6 +97,7 @@ policy:
   add_orcid: true
   add_employer: true                     # current NVA affiliations -> employer (P108), no dates
   add_position: true                     # NVA role -> qualifier on the employer statement
+  add_point_in_time: true                # current employment without dates gets P585 = date NVA was read
   add_former_employers: false            # inactive affiliations, with end time = unknown value
   mark_ended_employment: false           # add end time = unknown value to employer statements only NVA backs
   add_references_to_existing: true       # existing identical statements get an NVA reference

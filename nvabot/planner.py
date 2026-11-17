@@ -74,6 +74,8 @@ class Props:
     applicable_stated_in: str = "P9073"
     position_qualifier: str = "P2868"      # 'subject has role' on the employer statement
     end_time: str = "P582"
+    start_time: str = "P580"
+    point_in_time: str = "P585"
     published_in: str = "P1433"
     volume: str = "P478"
     issue: str = "P433"
@@ -101,6 +103,7 @@ class Policy:
     add_orcid: bool = True
     add_employer: bool = True
     add_position: bool = True               # role from NVA as qualifier on the employer statement
+    add_point_in_time: bool = True          # P585 = date NVA was read, on current employment without dates
     add_former_employers: bool = False      # inactive NVA affiliations, with end time = unknown value
     mark_ended_employment: bool = False     # add end time = unknown value to statements only NVA supports
     add_references_to_existing: bool = True
@@ -296,11 +299,13 @@ def _only_nva_sourced(claim: dict, ctx: Context) -> bool:
 def plan_employment(entity: dict, person: dict, ctx: Context, ref: dict) -> List[Action]:
     """Employer (P108) per institution, with the NVA position as qualifier.
 
-    NVA has no start/end dates. Current affiliations are added without dates (the
-    reference's 'retrieved' date says when it was true); former ones only on request,
-    with end time = unknown value.
+    NVA has no start/end dates. Current affiliations get point in time (P585) = the day NVA
+    was read, so the statement itself says when it was known to be true; it is set once and not
+    refreshed on later runs. Former affiliations only on request, with end time = unknown value.
     """
     p, pol, qid = ctx.props, ctx.policy, entity["id"]
+    seen_on = wb.time_snak(p.point_in_time, wb.day_time(ctx.today), 11)
+    time_props = {p.start_time, p.end_time, p.point_in_time}
     groups: Dict[str, dict] = {}
     for aff in person.get("affiliations") or []:
         org_qid = ctx.org_map.get(institution_number(aff.get("organization")) or "")
@@ -329,6 +334,8 @@ def plan_employment(entity: dict, person: dict, ctx: Context, ref: dict) -> List
             quals = [wb.item_snak(p.position_qualifier, r) for r in roles]
             if not g["active"]:
                 quals.append(wb.somevalue_snak(p.end_time))
+            elif pol.add_point_in_time:
+                quals.append(seen_on)
             actions.append(Action("add_claim", qid, p.employer, org_qid, "employer missing on Wikidata",
                                   claim=wb.statement(wb.item_snak(p.employer, org_qid), quals, [ref])))
             continue
@@ -340,6 +347,8 @@ def plan_employment(entity: dict, person: dict, ctx: Context, ref: dict) -> List
         target = (open_claims or live)[0]
         have = set(wb.qualifier_values(target, p.position_qualifier))
         new_quals = [wb.item_snak(p.position_qualifier, r) for r in roles if r not in have]
+        if g["active"] and pol.add_point_in_time and not (time_props & set(target.get("qualifiers") or {})):
+            new_quals.append(seen_on)   # only when the statement has no dates at all
         if not g["active"] and target in open_claims:
             if pol.mark_ended_employment and _only_nva_sourced(target, ctx):
                 new_quals.append(wb.somevalue_snak(p.end_time))

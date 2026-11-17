@@ -35,6 +35,25 @@ def test_names():
     assert not names_match("Ida Bos-Haugen", "Ida Haugen")
 
 
+def test_names_word_by_word_never_fuzzy():
+    # the reviewer's examples (Wikidata:Requests for permissions/Bot/NVAImportBot)
+    assert names_match("A. Nobel", "Alfred Nobel")
+    assert names_match("A. B. Nobel", "Alfred Nobel")
+    assert not names_match("Olfred Nabel", "Alfred Nobel")          # small edit distance, still no match
+    # every given name is compared, not only the first initial
+    assert not names_match("Anna Nobel", "Alfred Nobel")
+    assert not names_match("A. C. Nobel", "Alfred Bernhard Nobel")
+    assert names_match("A. B. Nobel", "Alfred Bernhard Nobel")
+    assert not names_match("Kristin Bos-Haugen", "Ida Kristin Bos-Haugen")
+    # a bare surname is never enough
+    assert not names_match("Nobel", "Alfred Nobel")
+    # name forms
+    assert names_match("Dupont JP", "Jean-Pierre Dupont")
+    assert names_match("J.-P. Dupont", "Jean-Pierre Dupont")
+    assert not names_match("Dupont JM", "Jean-Pierre Dupont")
+    assert names_match("IDA BOS-HAUGEN", "Ida Bos-Haugen")          # all caps is not read as initials
+
+
 def test_titles_and_dates():
     assert title_similarity("A Simple Model: part 1", "a simple model - part 1") == 1.0
     assert title_similarity("Something else entirely", "A simple model for avalanches") < 0.5
